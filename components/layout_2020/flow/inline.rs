@@ -27,6 +27,7 @@ use webrender_api::FontInstanceKey;
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct InlineFormattingContext {
     pub(super) inline_level_boxes: Vec<Arc<InlineLevelBox>>,
+    pub(super) text_decoration_line: TextDecorationLine,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +83,11 @@ struct InlineFormattingContextState<'box_tree, 'a, 'b> {
     inline_position: Length,
     partial_inline_boxes_stack: Vec<PartialInlineBoxFragment<'box_tree>>,
     current_nesting_level: InlineNestingLevelState<'box_tree>,
+    /// Indicates whether IFC children have text decorations in effect.
+    /// From https://drafts.csswg.org/css-text-decor/#line-decoration
+    // "When specified on or propagated to a block container that establishes
+    //  an IFC..."
+    text_decoration_line: TextDecorationLine,
 }
 
 struct Lines {
@@ -91,6 +97,13 @@ struct Lines {
 }
 
 impl InlineFormattingContext {
+    pub(super) fn new(text_decoration_line: TextDecorationLine) -> InlineFormattingContext {
+        InlineFormattingContext {
+            inline_level_boxes: Default::default(),
+            text_decoration_line,
+        }
+    }
+
     // This works on an already-constructed `InlineFormattingContext`,
     // Which would have to change if/when
     // `BlockContainer::construct` parallelize their construction.
@@ -225,7 +238,9 @@ impl InlineFormattingContext {
                 inline_start: Length::zero(),
                 max_block_size_of_fragments_so_far: Length::zero(),
             },
+            text_decoration_line: self.text_decoration_line,
         };
+
         loop {
             if let Some(child) = ifc.current_nesting_level.remaining_boxes.next() {
                 match &**child {
@@ -346,17 +361,6 @@ impl Lines {
             block: line_block_size,
         };
         self.next_line_block_position += size.block;
-
-        // From https://drafts.csswg.org/css-text-decor/#line-decoration
-        // "When specified on or propagated to an inline box,
-        // that box becomes a decorating box for that decoration,
-        // applying the decoration to all its fragments..."
-        let text_decoration_line = containing_block.style.clone_text_decoration_line();
-        if text_decoration_line != TextDecorationLine::NONE {
-            for fragment in &mut line_contents {
-                fragment.set_text_decorations_in_effect(text_decoration_line);
-            }
-        }
 
         self.fragments
             .push(Fragment::Anonymous(AnonymousFragment::new(
@@ -734,7 +738,7 @@ impl TextRun {
                     font_metrics,
                     font_key,
                     glyphs,
-                    text_decorations_in_effect: TextDecorationLine::NONE,
+                    text_decoration_line: ifc.text_decoration_line,
                 }));
             if runs.is_empty() {
                 break;

@@ -18,6 +18,7 @@ use servo_arc::Arc;
 use std::convert::{TryFrom, TryInto};
 use style::properties::ComputedValues;
 use style::selector_parser::PseudoElement;
+use style::values::specified::text::TextDecorationLine;
 
 impl BlockFormattingContext {
     pub fn construct<'dom>(
@@ -26,9 +27,16 @@ impl BlockFormattingContext {
         style: &Arc<ComputedValues>,
         contents: NonReplacedContents,
         content_sizes: ContentSizesRequest,
+        propagated_text_decoration_line: TextDecorationLine,
     ) -> (Self, BoxContentSizes) {
-        let (contents, contains_floats, inline_content_sizes) =
-            BlockContainer::construct(context, node, style, contents, content_sizes);
+        let (contents, contains_floats, inline_content_sizes) = BlockContainer::construct(
+            context,
+            node,
+            style,
+            contents,
+            content_sizes,
+            propagated_text_decoration_line,
+        );
         // FIXME: add contribution to `inline_content_sizes` of floats in this formatting context
         // https://dbaron.org/css/intrinsic/#intrinsic
         let bfc = Self {
@@ -51,6 +59,7 @@ enum BlockLevelCreator {
     Independent {
         display_inside: DisplayInside,
         contents: Contents,
+        propagated_text_decoration_line: TextDecorationLine,
     },
     OutOfFlowAbsolutelyPositionedBox {
         display_inside: DisplayInside,
@@ -71,7 +80,7 @@ enum BlockLevelCreator {
 /// Deferring allows using rayon’s `into_par_iter`.
 enum IntermediateBlockContainer {
     InlineFormattingContext(InlineFormattingContext),
-    Deferred(NonReplacedContents),
+    Deferred(NonReplacedContents, TextDecorationLine),
 }
 
 /// A builder for a block container.
@@ -139,13 +148,16 @@ impl BlockContainer {
         block_container_style: &Arc<ComputedValues>,
         contents: NonReplacedContents,
         content_sizes: ContentSizesRequest,
+        propagated_text_decoration_line: TextDecorationLine,
     ) -> (BlockContainer, ContainsFloats, BoxContentSizes) {
+        let text_decoration_line =
+            propagated_text_decoration_line | block_container_style.clone_text_decoration_line();
         let mut builder = BlockContainerBuilder {
             context,
             root,
             block_container_style,
             block_level_boxes: Vec::new(),
-            ongoing_inline_formatting_context: InlineFormattingContext::default(),
+            ongoing_inline_formatting_context: InlineFormattingContext::new(text_decoration_line),
             ongoing_inline_boxes_stack: Vec::new(),
             anonymous_style: None,
             contains_floats: ContainsFloats::No,
@@ -420,6 +432,8 @@ where
                     display_inside,
                     contents,
                     ContentSizesRequest::inline_if(!style.inline_size_is_length()),
+                    // Text decorations are not propagated to atomic inline-level descendants.
+                    TextDecorationLine::NONE,
                 ),
             ))
         };
@@ -475,6 +489,9 @@ where
                 .push(Arc::new(fragmented_inline));
         }
 
+        let propagated_text_decoration_line =
+            self.ongoing_inline_formatting_context.text_decoration_line;
+
         // We found a block level element, so the ongoing inline formatting
         // context needs to be ended.
         self.end_ongoing_inline_formatting_context();
@@ -482,11 +499,12 @@ where
         let kind = match contents.try_into() {
             Ok(contents) => match display_inside {
                 DisplayInside::Flow => BlockLevelCreator::SameFormattingContextBlock(
-                    IntermediateBlockContainer::Deferred(contents),
+                    IntermediateBlockContainer::Deferred(contents, propagated_text_decoration_line),
                 ),
                 _ => BlockLevelCreator::Independent {
                     display_inside,
                     contents: contents.into(),
+                    propagated_text_decoration_line,
                 },
             },
             Err(contents) => {
@@ -494,6 +512,7 @@ where
                 BlockLevelCreator::Independent {
                     display_inside,
                     contents,
+                    propagated_text_decoration_line,
                 }
             },
         };
@@ -661,6 +680,7 @@ where
             BlockLevelCreator::Independent {
                 display_inside,
                 contents,
+                propagated_text_decoration_line,
             } => {
                 let content_sizes = ContentSizesRequest::inline_if(
                     max_assign_in_flow_outer_content_sizes_to.is_some() &&
@@ -673,6 +693,7 @@ where
                     display_inside,
                     contents,
                     content_sizes,
+                    propagated_text_decoration_line,
                 );
                 if let Some(to) = max_assign_in_flow_outer_content_sizes_to {
                     to.max_assign(&contents.content_sizes.outer_inline(&contents.style))
@@ -722,8 +743,15 @@ impl IntermediateBlockContainer {
         content_sizes: ContentSizesRequest,
     ) -> (BlockContainer, ContainsFloats, BoxContentSizes) {
         match self {
-            IntermediateBlockContainer::Deferred(contents) => {
-                BlockContainer::construct(context, node, style, contents, content_sizes)
+            IntermediateBlockContainer::Deferred(contents, propagated_text_decoration_line) => {
+                BlockContainer::construct(
+                    context,
+                    node,
+                    style,
+                    contents,
+                    content_sizes,
+                    propagated_text_decoration_line,
+                )
             },
             IntermediateBlockContainer::InlineFormattingContext(ifc) => {
                 let content_sizes = content_sizes.compute(|| ifc.inline_content_sizes(context));

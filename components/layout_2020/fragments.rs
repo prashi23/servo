@@ -113,7 +113,7 @@ pub(crate) struct TextFragment {
     pub font_key: FontInstanceKey,
     pub glyphs: Vec<Arc<GlyphStore>>,
     /// A flag that represents the _used_ value of the text-decoration property.
-    pub text_decorations_in_effect: TextDecorationLine,
+    pub text_decoration_line: TextDecorationLine,
 }
 
 #[derive(Serialize)]
@@ -158,23 +158,6 @@ impl Fragment {
             Fragment::Image(fragment) => fragment
                 .rect
                 .to_physical(fragment.style.writing_mode, &containing_block),
-        }
-    }
-
-    pub fn set_text_decorations_in_effect(&mut self, text_decorations: TextDecorationLine) {
-        match self {
-            Fragment::Text(fragment) => fragment.text_decorations_in_effect = text_decorations,
-            Fragment::Box(fragment) => {
-                for child in &mut fragment.children {
-                    child.set_text_decorations_in_effect(text_decorations);
-                }
-            },
-            Fragment::Anonymous(fragment) => {
-                for child in &mut fragment.children {
-                    child.set_text_decorations_in_effect(text_decorations);
-                }
-            },
-            _ => (),
         }
     }
 }

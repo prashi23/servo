@@ -137,7 +137,7 @@ impl Fragment {
 
         // Underline.
         if fragment
-            .text_decorations_in_effect
+            .text_decoration_line
             .contains(TextDecorationLine::UNDERLINE)
         {
             let mut rect = rect;
@@ -148,7 +148,7 @@ impl Fragment {
 
         // Overline.
         if fragment
-            .text_decorations_in_effect
+            .text_decoration_line
             .contains(TextDecorationLine::OVERLINE)
         {
             let mut rect = rect;
@@ -168,7 +168,7 @@ impl Fragment {
 
         // Line-through.
         if fragment
-            .text_decorations_in_effect
+            .text_decoration_line
             .contains(TextDecorationLine::LINE_THROUGH)
         {
             let mut rect = rect;
