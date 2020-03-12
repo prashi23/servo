@@ -16,6 +16,7 @@ use servo_arc::Arc;
 use style::computed_values::position::T as Position;
 use style::properties::ComputedValues;
 use style::values::computed::{Length, LengthOrAuto, LengthPercentage, LengthPercentageOrAuto};
+use style::values::specified::text::TextDecorationLine;
 use style::Zero;
 
 #[derive(Debug, Serialize)]
@@ -87,6 +88,8 @@ impl AbsolutelyPositionedBox {
                 display_inside,
                 contents,
                 content_sizes,
+                // Text decorations are not propagated to any out-of-flow descendants.
+                TextDecorationLine::NONE,
             ),
         }
     }

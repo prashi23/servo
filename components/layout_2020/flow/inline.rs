@@ -6,8 +6,8 @@ use crate::context::LayoutContext;
 use crate::flow::float::FloatBox;
 use crate::flow::FlowLayout;
 use crate::formatting_contexts::IndependentFormattingContext;
-use crate::fragments::CollapsedBlockMargins;
-use crate::fragments::{AnonymousFragment, BoxFragment, DebugId, Fragment, TextFragment};
+use crate::fragments::{AnonymousFragment, BoxFragment, CollapsedBlockMargins, DebugId};
+use crate::fragments::{FontMetrics, Fragment, TextFragment};
 use crate::geom::flow_relative::{Rect, Sides, Vec2};
 use crate::positioned::{relative_adjustement, AbsolutelyPositionedBox, PositioningContext};
 use crate::sizing::ContentSizes;
@@ -20,12 +20,14 @@ use style::dom::OpaqueNode;
 use style::properties::ComputedValues;
 use style::values::computed::{Length, LengthPercentage, Percentage};
 use style::values::specified::text::TextAlignKeyword;
+use style::values::specified::text::TextDecorationLine;
 use style::Zero;
 use webrender_api::FontInstanceKey;
 
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct InlineFormattingContext {
     pub(super) inline_level_boxes: Vec<Arc<InlineLevelBox>>,
+    pub(super) text_decoration_line: TextDecorationLine,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,6 +83,11 @@ struct InlineFormattingContextState<'box_tree, 'a, 'b> {
     inline_position: Length,
     partial_inline_boxes_stack: Vec<PartialInlineBoxFragment<'box_tree>>,
     current_nesting_level: InlineNestingLevelState<'box_tree>,
+    /// Indicates whether IFC children have text decorations in effect.
+    /// From https://drafts.csswg.org/css-text-decor/#line-decoration
+    // "When specified on or propagated to a block container that establishes
+    //  an IFC..."
+    text_decoration_line: TextDecorationLine,
 }
 
 struct Lines {
@@ -90,6 +97,13 @@ struct Lines {
 }
 
 impl InlineFormattingContext {
+    pub(super) fn new(text_decoration_line: TextDecorationLine) -> InlineFormattingContext {
+        InlineFormattingContext {
+            inline_level_boxes: Default::default(),
+            text_decoration_line,
+        }
+    }
+
     // This works on an already-constructed `InlineFormattingContext`,
     // Which would have to change if/when
     // `BlockContainer::construct` parallelize their construction.
@@ -224,7 +238,9 @@ impl InlineFormattingContext {
                 inline_start: Length::zero(),
                 max_block_size_of_fragments_so_far: Length::zero(),
             },
+            text_decoration_line: self.text_decoration_line,
         };
+
         loop {
             if let Some(child) = ifc.current_nesting_level.remaining_boxes.next() {
                 match &**child {
@@ -345,6 +361,7 @@ impl Lines {
             block: line_block_size,
         };
         self.next_line_block_position += size.block;
+
         self.fragments
             .push(Fragment::Anonymous(AnonymousFragment::new(
                 Rect { start_corner, size },
@@ -577,8 +594,7 @@ fn layout_atomic<'box_tree>(
 }
 
 struct BreakAndShapeResult {
-    font_ascent: Au,
-    font_line_gap: Au,
+    font_metrics: FontMetrics,
     font_key: FontInstanceKey,
     runs: Vec<GlyphRun>,
     break_at_start: bool,
@@ -645,8 +661,7 @@ impl TextRun {
             );
 
             BreakAndShapeResult {
-                font_ascent: font.metrics.ascent,
-                font_line_gap: font.metrics.line_gap,
+                font_metrics: (&font.metrics).into(),
                 font_key: font.font_key,
                 runs,
                 break_at_start,
@@ -658,8 +673,7 @@ impl TextRun {
         use style::values::generics::text::LineHeight;
 
         let BreakAndShapeResult {
-            font_ascent,
-            font_line_gap,
+            font_metrics,
             font_key,
             runs,
             break_at_start: _,
@@ -696,7 +710,7 @@ impl TextRun {
                 }
             }
             let line_height = match self.parent_style.get_inherited_text().line_height {
-                LineHeight::Normal => font_line_gap.into(),
+                LineHeight::Normal => font_metrics.line_gap,
                 LineHeight::Number(n) => font_size * n.0,
                 LineHeight::Length(l) => l.0,
             };
@@ -721,9 +735,10 @@ impl TextRun {
                     debug_id: DebugId::new(),
                     parent_style: self.parent_style.clone(),
                     rect,
-                    ascent: font_ascent.into(),
+                    font_metrics,
                     font_key,
                     glyphs,
+                    text_decoration_line: ifc.text_decoration_line,
                 }));
             if runs.is_empty() {
                 break;

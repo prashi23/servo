@@ -98,6 +98,7 @@ fn construct_for_root_element<'dom>(
             ))],
         )
     } else {
+        let propagated_text_decoration_line = style.clone_text_decoration_line();
         (
             ContainsFloats::No,
             vec![Arc::new(BlockLevelBox::Independent(
@@ -108,6 +109,7 @@ fn construct_for_root_element<'dom>(
                     display_inside,
                     contents,
                     ContentSizesRequest::None,
+                    propagated_text_decoration_line,
                 ),
             ))],
         )
